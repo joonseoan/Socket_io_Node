@@ -1,0 +1,2 @@
+For server we need to install npm i --save socket.io
+for cleint we need to install npm i --save socket.io-client

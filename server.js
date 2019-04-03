@@ -11,23 +11,17 @@ const { mongoKey } = require('./config/keys');
 const Mongo_URI = `mongodb+srv://joon:${mongoKey}@firstatlas-drwhc.mongodb.net/messages`;
 
 const app = express();
-// for incomming data!!!! based on json.
 
-// where the file is stored
 const fileStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // pointing out the images folder in this project.
     cb(null, 'images')
   },
   filename: (req, file, cb) => {
-    //     // when using OSX
-    // cb(null, new Date().toISOString().replace(/:/g, '-')  + '-' + file.originalname);
     cb(null, uuidv4());
   }
 
 });
 
-// define image file extension.
 const fileFilter = (req, file, cb) => {
   if(file.mimetype === 'image/png' || file.mimetype === 'image/jpg' || file.mimetype === 'image/jpeg') {
     cb(null, true);
@@ -37,32 +31,20 @@ const fileFilter = (req, file, cb) => {
 }
 
 app.use(bodyParser.json());
-
-// [uploading]
-// define upload library
-// Accept a single file with the name "fieldName."" 
-// The single file will be stored in "req.file.""
-// "image" : the request from the client contains the content-type: image.
-//  whenever the client requests "image" on POST at any route, the file will be stroed as image.!!!!
 app.use(multer({ storage: fileStorage, fileFilter: fileFilter }).single('image'));
-
-// [downloading]
 app.use('/images', express.static(path.join(__dirname, 'images')));
-
 app.use((req, res, next) => {
-    // Access-Control-Allow-Origin: set up that client allows cross origin resource sharing
-    //  "*":  any clients or we can specify like "codepen.io"
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE');
-    // make the client set Content-Type and Authorization (to be discussed)
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     next();
 });
 
+// socketio is using web socket protocol,
+//  and therefore it does not affect http connection. 
 app.use('/feed', feedRoutes);
 app.use('/auth', authRoutes);
 
-// errors because of "next(e)"
 app.use((error, req, res, next) => {
     console.log('error in server.js', error);
     const status = error.statusCode || 500;
@@ -76,8 +58,47 @@ app.use((error, req, res, next) => {
 mongoose
   .connect(Mongo_URI, { useNewUrlParser: true })
   .then(() => {
+
+    // Once database and http connections are established,
+    // then at the environment of http, the web socket (channel) connection
+    //  can be established.
+
+    // Bear in mind again that http and web socket are different protocols but
+    //  web socket is connected on the basis of http.
     console.log('Server is up!');
-    app.listen(8080);
+    const server = app.listen(8080);
+
+    // 1) return function. 2) the server returned from app.listen()
+    // must pass down to socket.io, as a parameter. 
+
+    // by the way, the server contains not oly "emit" and "on" objects 
+    //  that values on functions to be used for the socket io.
+    // At this point, socket io has a role to open a channel 
+    //  and push data to the clients, but doe not have a role to bring up the tools
+    //  such as emit and on.
+
+    // but also, "use", "request", "response", "set" and so on to be used 
+    //  for the legacy http server.
+    //  console.log(app.listen(8080))
+    
+    // 2) socketio initialization and running with express apps
+    const io = require('./socketio').init(server);
+
+    // 1) just for socketio initializtion
+    // const io = require('socket.io')(server);
+    io.on('connection', socket => {
+      
+      // the server keeps trying to listen to "connection" message. 
+      // "connection" is a default message when the clients try to connect to a server.
+
+      // If it listen to "connection" key word.
+      //  it runs the callback function which has a parameter of "socket".
+      // The socket contains server, client and channel information where socket is connected.
+
+      // Then it pushes something to the connected clients without their request.
+      // console.log('socket: ', socket)
+      console.log('Client connected.');
+    });
   })
   .catch(err => {
     console.log(err);

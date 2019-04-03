@@ -2,17 +2,18 @@ const { validationResult } = require('express-validator/check');
 const fs = require('fs');
 const path = require('path');
 
-const isAuthenticated = require('../middleware/is_auth');
 const Post = require('../models/post');
 const User = require('../models/user');
+const io = require('../socketio');
 
 exports.getPosts = async (req, res, next) => {
 
-    const currentPage= req.query.page || 1;
+    const currentPage = req.query.page || 1;
     const perPage = 2;
 
     try {
-
+        // find() is not Promise which will receive the callback.
+        // Instead it supports "then" function that still makes use of async and await.
         const count = await Post.find().countDocuments();
         
         if(!count) {
@@ -22,13 +23,13 @@ exports.getPosts = async (req, res, next) => {
         }
 
         const posts = await Post.find().populate('creator').skip((currentPage - 1) * perPage).limit(perPage);
-        console.log('posts', posts)
 
         if(!posts) {
             const error = new Error('Unable to find the post list.');
             error.statusCode = 422;
             throw error;
         }
+
         res.status(200).json({
             message: 'successfully fetched the post list.',
             posts,
@@ -41,18 +42,15 @@ exports.getPosts = async (req, res, next) => {
         }
         next(e);
     }
-
 };
 
 exports.createPost = async (req, res, next) => {
     const errors = validationResult(req);
     if(!errors.isEmpty()) {
-        console.log('errors from validation: ', errors);
         const error = new Error('Validation Failed. Entered data is incorrect.');
         error.statusCode = 422;
         throw error;
     }
-
     if(!req.file) {
         const error = new Error('Unable to get image file.');
         error.statusCode = 422;
@@ -74,12 +72,32 @@ exports.createPost = async (req, res, next) => {
         title,
         imageUrl,
         content,
+        // need to populate()
         creator: userId
     });
 
     try {
-
+        // promise built-in
         await post.save();
+
+        /* 
+            [Mongoose queries are not promise!!!]
+            Model.deleteMany()
+            Model.deleteOne()
+            Model.find()
+            Model.findById()
+            Model.findByIdAndDelete()
+            Model.findByIdAndRemove()
+            Model.findByIdAndUpdate()
+            Model.findOne()
+            Model.findOneAndDelete()
+            Model.findOneAndRemove()
+            Model.findOneAndUpdate()
+            Model.replaceOne()
+            Model.updateMany()
+            Model.updateOne()
+        
+        */
 
         const user = await User.findById(userId);
 
@@ -94,14 +112,24 @@ exports.createPost = async (req, res, next) => {
         
         await user.save();
 
+        // adding socket io implementation here
+        // broadcast: all clients except for the client who sent the request.
+        // emit : all clients including the client who sent the request. 
+        
+        // copy the entir document of mongoDB, not copy the mongoose instance.
+        // console.log('post._doc: ', post._doc);
+        io.getIO().emit('posts', { 
+            action: 'create', 
+            post: { ...post._doc, creator: { _id: req.userId, name: user.name }} 
+        });
+
         res.status(201).json({
             message: 'Post created successfully',
             post,
             creator: { _id: user._id, name: user.name }
         });
 
-    } catch(e) {
-        
+    } catch(e) {        
         if(!e.statusCode) {
             // server side error
             e.statusCode = 500;
@@ -115,8 +143,9 @@ exports.getPost = async (req, res, next) => {
     const postId = req.params.postId;
 
     try {
-
-        const post = await Post.findById(postId);
+        // for the mongoose Promise.
+        //  we do not need "exec()"
+        const post = await Post.findById(postId).populate('creator');
 
         if(!post) {
             const error = new Error('Unable to find post.');
@@ -128,10 +157,7 @@ exports.getPost = async (req, res, next) => {
             message: 'The post successfully fetched.',
             post 
         });
-
-
     } catch(e) {
-
         if(!e.statusCode) {
             e.statusCode = 500;
         }
@@ -154,8 +180,6 @@ exports.updatePost = async (req, res, next) => {
 
     const { title, content } = req.body;
     let imageUrl = req.body.image;
-
-    console.log('imageUrl: ', imageUrl);
 
     if(req.file) {
         imageUrl = req.file.path.replace("\\" ,"/");
@@ -198,7 +222,6 @@ exports.updatePost = async (req, res, next) => {
         });
 
     } catch(e) {
-
         if(!e.statusCode) {
             e.statusCode = 500;
         }

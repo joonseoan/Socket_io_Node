@@ -76,7 +76,7 @@ exports.login = async (req, res, next) => {
             throw error;
         }
         
-        const token = await jwt.sign({
+        const token = jwt.sign({
             email : user.email,
             userId: user._id.toString()
             // setup expiring time : 1hour
@@ -84,7 +84,7 @@ exports.login = async (req, res, next) => {
             // ************************************
         }, 'xxxx', { expiresIn : '1h' });
         
-        console.log('token ===============>: ', token)
+        console.log('token ===============>: ', token);
         res.status(200).json({
             token,
             userId: user._id.toString()
