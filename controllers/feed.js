@@ -15,14 +15,24 @@ exports.getPosts = async (req, res, next) => {
         // find() is not Promise which will receive the callback.
         // Instead it supports "then" function that still makes use of async and await.
         const count = await Post.find().countDocuments();
+        // console.log('count: ', count === 0)
         
-        if(!count) {
+        // count 0 ========================> false!!!!!!!!!!!!!!!!!!!!!! **********************
+        // Therefore, length is better
+        if(!count && count !== 0) {
             const error = new Error('Unable to get count.');
             error.statusCode = 422;
             throw error;
         }
 
-        const posts = await Post.find().populate('creator').skip((currentPage - 1) * perPage).limit(perPage);
+        const posts = await Post.find()
+            .populate('creator')
+            // it is a descending order
+            // {} : to get createdAt property out of 'post' out 'posts', an array 
+            // it is like posts.sort(post => post.createdAt === -1)??
+            .sort({ createdAt: -1 })
+            .skip((currentPage - 1) * perPage)
+            .limit(perPage);
 
         if(!posts) {
             const error = new Error('Unable to find the post list.');
@@ -112,6 +122,7 @@ exports.createPost = async (req, res, next) => {
         
         await user.save();
 
+        // io.getIO() for anyone of the clients that has not sent the request
         // adding socket io implementation here
         // broadcast: all clients except for the client who sent the request.
         // emit : all clients including the client who sent the request. 
@@ -123,6 +134,7 @@ exports.createPost = async (req, res, next) => {
             post: { ...post._doc, creator: { _id: req.userId, name: user.name }} 
         });
 
+        // res.status(201).json({}) for a client who sent the request!!!
         res.status(201).json({
             message: 'Post created successfully',
             post,
@@ -181,6 +193,17 @@ exports.updatePost = async (req, res, next) => {
     const { title, content } = req.body;
     let imageUrl = req.body.image;
 
+    // if image is not selected in a while of editing, 
+    //  the default value is the existing file name
+    //  because the client has "this.state.editPost", which is a post value
+    //  including imageUrl!!!
+    //  This imageUrl is assigned to file input value
+    //  even though it is not recognized.
+
+    // this.state.editPost is delivered to the client 
+    // during "getPost"!
+    console.log('imageUrl of req.body.image: ', imageUrl);
+
     if(req.file) {
         imageUrl = req.file.path.replace("\\" ,"/");
     }
@@ -192,7 +215,9 @@ exports.updatePost = async (req, res, next) => {
     }
 
     try {
-        const post = await Post.findById(postId);
+        const post = await Post.findById(postId).populate('creator');
+        // with populate
+        console.log('post: ', post)
         
         if(!post) {
             const error = new Error('Unable to find the post to be updated.');
@@ -200,7 +225,7 @@ exports.updatePost = async (req, res, next) => {
             throw error;
         }
 
-        if(post.creator.toString() !== userId) {
+        if(post.creator._id.toString() !== userId) {
             const error = new Error('The post is not for the current logged-in user');
             error.statusCode = 403;
             throw error;
@@ -215,7 +240,14 @@ exports.updatePost = async (req, res, next) => {
         post.content = content;
 
         const updatedPost = await post.save();
-    
+
+        // 'posts: ' same name as the one above
+        //  it will be assigned to "posts" object!
+        io.getIO().emit('posts', {
+            action: 'update',
+            post: updatedPost
+        })
+
         res.status(200).json({
             message: 'successfully updated',
             post: updatedPost
@@ -257,6 +289,11 @@ exports.deletePost= async (req, res, next) => {
 
         await user.save();
 
+        io.getIO().emit('posts', {
+            action: 'delete',
+            post: postId
+        });
+
         res.status(200).json({
             message: 'successfully deleted',
         });
@@ -267,7 +304,6 @@ exports.deletePost= async (req, res, next) => {
         }
         next(e);
     }
-
 };
 
 const clearImage = filePath => {
